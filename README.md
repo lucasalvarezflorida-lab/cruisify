@@ -9,8 +9,8 @@ A next-gen cruise ship fleet tracker — proof of concept.
 - Interactive dark-theme map (Leaflet + CartoDB Dark Matter tiles) tracking a simulated cruise fleet in the Caribbean
 - Directional ship markers rotated to live heading; docked vessels render as ring dots
 - Fleet search by ship name, class, or cruise line
-- Per-vessel detail panel: live telemetry (coordinates, speed/heading, tonnage), CDC health score, current itinerary, next port of call, and port congestion context
-- Simulated AIS tick — underway vessels advance along their heading every 5 seconds
+- Per-vessel detail panel: live telemetry (coordinates, speed/heading, tonnage, AIS data freshness), CDC health score, current itinerary, next port of call, and port congestion context
+- **Live AIS positions** via AISStream.io WebSocket (bring your own free API key), with a simulated fallback when no key is set
 
 ## Why it exists
 
@@ -22,10 +22,23 @@ Single-file static app: HTML + Tailwind (CDN) + Leaflet. No build step, no backe
 
 ## Roadmap
 
-- [ ] Replace simulated tick with live AIS via AISStream.io WebSocket (filtered to cruise ship MMSIs)
+- [x] Replace simulated tick with live AIS via AISStream.io WebSocket (filtered to cruise ship MMSIs)
 - [ ] Real itinerary data source
 - [ ] Interactive deck plan / blueprint viewer
 - [ ] Port congestion scoring from ships-in-port counts
+
+## Getting live data
+
+Positions are simulated until an [AISStream.io](https://aisstream.io) API key (free) is provided:
+
+- **On the site:** click **AIS KEY** in the header and paste your key. It's stored only in your browser's localStorage and sent only to AISStream.
+- **Local dev:** create a `config.js` next to `index.html` (it's gitignored):
+
+  ```js
+  window.CRUISIFY_CONFIG = { aisApiKey: "your-key-here" };
+  ```
+
+Note: AISStream uses terrestrial AIS receivers, so ships far from shore can go quiet for stretches — the detail panel shows how fresh each ship's last report is, and the last known position stays on the map.
 
 ## Running locally
 

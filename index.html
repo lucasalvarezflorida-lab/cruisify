@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Local dev only: gitignored, defines window.CRUISIFY_CONFIG = { aisApiKey }. 404s harmlessly when absent. -->
+    <script src="config.js"></script>
     <style>
         #map { height: calc(100vh - 64px); }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
@@ -32,10 +34,11 @@
             <h1 class="text-xl font-bold tracking-wider text-cyan-400">CRUISIFY<span class="text-xs text-slate-400 font-normal ml-2">PoC v1.1</span></h1>
         </div>
         <div class="flex items-center space-x-4">
-            <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 font-mono flex items-center space-x-1.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span>
-                <span>Live AIS Feed Simulated</span>
+            <span id="feed-badge" class="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded border border-amber-500/30 font-mono flex items-center space-x-1.5">
+                <span id="feed-dot" class="w-1.5 h-1.5 rounded-full bg-amber-400 pulse-dot"></span>
+                <span id="feed-label">Simulated Feed</span>
             </span>
+            <button onclick="openKeyModal()" class="text-xs text-slate-400 hover:text-cyan-400 border border-slate-700 hover:border-cyan-500/50 rounded px-2 py-1 font-mono transition">AIS KEY</button>
         </div>
     </header>
 
@@ -90,6 +93,7 @@
                         <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono mb-2">Live Telemetry</h3>
                         <div class="flex justify-between text-xs"><span class="text-slate-400">Coordinates</span><span id="det-coords" class="font-mono text-slate-200"></span></div>
                         <div class="flex justify-between text-xs"><span class="text-slate-400">Speed / Heading</span><span id="det-speed" class="font-mono text-slate-200"></span></div>
+                        <div class="flex justify-between text-xs"><span class="text-slate-400">Last AIS Update</span><span id="det-lastseen" class="font-mono text-slate-200"></span></div>
                         <div class="flex justify-between text-xs"><span class="text-slate-400">Gross Tonnage</span><span id="det-tonnage" class="font-mono text-slate-200"></span></div>
                         <div class="flex justify-between text-xs"><span class="text-slate-400">Port Capacity Context</span><span id="det-congestion" class="text-amber-400 font-medium text-right pl-4"></span></div>
                     </div>
@@ -122,6 +126,27 @@
         </div>
     </main>
 
+    <div id="key-modal" class="hidden fixed inset-0 bg-slate-950/80 z-[2000] flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-lg max-w-md w-full p-6 space-y-4">
+            <h3 class="text-lg font-bold text-white">Connect Live AIS</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+                Paste your free <a href="https://aisstream.io" target="_blank" rel="noopener" class="text-cyan-400 hover:underline">AISStream.io</a> API key to track the fleet's real-time positions.
+                The key is stored only in your browser and sent only to AISStream.
+            </p>
+            <input id="key-input" type="password" placeholder="AISStream.io API key"
+                class="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-cyan-500 text-slate-200"
+                autocomplete="off">
+            <p id="key-error" class="hidden text-xs text-red-400"></p>
+            <div class="flex justify-between items-center pt-1">
+                <button onclick="clearKey()" id="key-clear-btn" class="hidden text-xs text-slate-500 hover:text-red-400">Remove saved key</button>
+                <div class="space-x-2 ml-auto">
+                    <button onclick="closeKeyModal()" class="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5">Cancel</button>
+                    <button onclick="saveKey()" class="text-xs bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/30 rounded px-3 py-1.5 font-bold">Save & Connect</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // ── Fleet Dataset ─────────────────────────────────────────────
         // speed (kn) and headingDeg are now first-class data fields so the
@@ -130,6 +155,7 @@
             {
                 id: "v1",
                 name: "Wonder of the Seas",
+                mmsi: 311001033,
                 class: "Oasis Class",
                 type: "Passenger (Cruise)",
                 line: "Royal Caribbean",
@@ -147,6 +173,7 @@
             {
                 id: "v2",
                 name: "Celebrity Beyond",
+                mmsi: 215808000,
                 class: "Edge Class",
                 type: "Passenger (Cruise)",
                 line: "Celebrity Cruises",
@@ -164,6 +191,7 @@
             {
                 id: "v3",
                 name: "Carnival Celebration",
+                mmsi: 311001223,
                 class: "Excel Class",
                 type: "Passenger (Cruise)",
                 line: "Carnival Cruise Line",
@@ -181,6 +209,7 @@
             {
                 id: "v4",
                 name: "Mardi Gras",
+                mmsi: 311001049,
                 class: "Excel Class",
                 type: "Passenger (Cruise)",
                 line: "Carnival Cruise Line",
@@ -198,6 +227,7 @@
             {
                 id: "v5",
                 name: "Icon of the Seas",
+                mmsi: 311001178,
                 class: "Icon Class",
                 type: "Passenger (Cruise)",
                 line: "Royal Caribbean",
@@ -215,6 +245,7 @@
             {
                 id: "v6",
                 name: "MSC Seascape",
+                mmsi: 256059000,
                 class: "Seaside EVO Class",
                 type: "Passenger (Cruise)",
                 line: "MSC Cruises",
@@ -250,7 +281,7 @@
         }
 
         function statusLabel(ship) {
-            return ship.speed > 0 ? `Cruising at ${ship.speed.toFixed(1)} kn` : ship.status;
+            return ship.speed > 0.5 ? `Cruising at ${ship.speed.toFixed(1)} kn` : ship.status;
         }
 
         // Directional SVG marker: arrow rotated to heading when underway,
@@ -258,7 +289,7 @@
         function markerIcon(ship, selected) {
             const fill = selected ? "#fbbf24" : ACCENTS[ship.accent].fill;
             const size = selected ? 30 : 22;
-            const shape = ship.speed > 0
+            const shape = ship.speed > 0.5
                 ? `<polygon points="12,2 19,20 12,15 5,20" fill="${fill}" stroke="#0f172a" stroke-width="1.5" transform="rotate(${ship.headingDeg} 12 12)"/>`
                 : `<circle cx="12" cy="12" r="7" fill="${fill}" stroke="#0f172a" stroke-width="2"/><circle cx="12" cy="12" r="10" fill="none" stroke="${fill}" stroke-width="1.5" opacity="0.5"/>`;
             return L.divIcon({
@@ -328,7 +359,7 @@
                     <div class="space-y-1">
                         <h4 class="font-bold text-white text-sm">${ship.name}</h4>
                         <p class="text-xs text-slate-400">${ship.class} • ${ship.line}</p>
-                        <p class="text-[11px] font-mono ${ship.speed > 0 ? 'text-emerald-400' : 'text-slate-400'} mt-1">${statusLabel(ship)}</p>
+                        <p class="text-[11px] font-mono ${ship.speed > 0.5 ? 'text-emerald-400' : 'text-slate-400'} mt-1">${statusLabel(ship)}</p>
                     </div>
                     <div class="text-right">
                         <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">CDC: ${ship.cdcScore}</span>
@@ -358,9 +389,10 @@
             document.getElementById('det-class').innerText = `${ship.class} • ${ship.line}`;
             document.getElementById('det-status').innerText = statusLabel(ship);
             document.getElementById('det-coords').innerText = `${ship.lat.toFixed(4)}°, ${ship.lng.toFixed(4)}°`;
-            document.getElementById('det-speed').innerText = ship.speed > 0
+            document.getElementById('det-speed').innerText = ship.speed > 0.5
                 ? `${ship.speed.toFixed(1)} kn / ${ship.headingDeg}° ${compass(ship.headingDeg)}`
-                : `0 kn / At Pier`;
+                : `${ship.speed.toFixed(1)} kn / At Pier`;
+            document.getElementById('det-lastseen').innerText = lastSeenLabel(ship);
             document.getElementById('det-tonnage').innerText = ship.tonnage;
             document.getElementById('det-itinerary').innerText = ship.currentItinerary;
             document.getElementById('det-nextport').innerText = ship.nextPort;
@@ -384,15 +416,150 @@
             map.flyTo([25.9, -80.15], 8, { duration: 1 });
         }
 
-        // ── Simulated AIS tick ────────────────────────────────────────
-        // Nudges underway vessels along their heading every 5s so the
-        // "Live Feed" badge is honest about being a simulation, not a
-        // static screenshot. Swap this block for a real WebSocket
-        // (e.g. AISStream.io) when moving past PoC.
+        // ── Live AIS feed (AISStream.io) ──────────────────────────────
+        // Key resolution: config.js (gitignored, local dev) → localStorage
+        // (visitor-supplied on the public site) → none (simulation).
+        // Once a ship receives real data (lastSeen set) it is never touched
+        // by the simulated tick again, even if the socket drops.
+        const KEY_STORAGE = 'cruisify_ais_key';
+        let feedState = 'sim';   // 'sim' | 'connecting' | 'live' | 'error'
+        let ws = null;
+        let reconnectDelay = 2000;
+        let rapidFailures = 0;
+        let lastOpenAt = 0;
+
+        const BADGES = {
+            sim:        { label: 'Simulated Feed',              cls: 'bg-amber-500/20 text-amber-400 border-amber-500/30',       dot: 'bg-amber-400' },
+            connecting: { label: 'Connecting to AIS…',          cls: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',          dot: 'bg-cyan-400' },
+            waiting:    { label: 'AIS Connected — Awaiting Reports', cls: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',     dot: 'bg-cyan-400' },
+            live:       { label: 'Live AIS Feed',               cls: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', dot: 'bg-emerald-400' },
+            error:      { label: 'AIS Unavailable — Simulating', cls: 'bg-red-500/20 text-red-400 border-red-500/30',            dot: 'bg-red-400' }
+        };
+
+        function getApiKey() {
+            return (window.CRUISIFY_CONFIG && window.CRUISIFY_CONFIG.aisApiKey) ||
+                   localStorage.getItem(KEY_STORAGE) || null;
+        }
+
+        function setFeedState(state) {
+            feedState = state;
+            const b = BADGES[state];
+            document.getElementById('feed-badge').className =
+                `text-xs px-2 py-1 rounded border font-mono flex items-center space-x-1.5 ${b.cls}`;
+            document.getElementById('feed-dot').className = `w-1.5 h-1.5 rounded-full pulse-dot ${b.dot}`;
+            document.getElementById('feed-label').innerText = b.label;
+        }
+
+        function connectAIS() {
+            const key = getApiKey();
+            if (!key) { setFeedState('sim'); return; }
+            setFeedState('connecting');
+            ws = new WebSocket('wss://stream.aisstream.io/v0/stream');
+
+            ws.onopen = () => {
+                lastOpenAt = Date.now();
+                ws.send(JSON.stringify({
+                    APIKey: key,
+                    BoundingBoxes: [[[-90, -180], [90, 180]]], // global; MMSI filter does the narrowing
+                    FiltersShipMMSI: vessels.map(v => String(v.mmsi)),
+                    FilterMessageTypes: ["PositionReport"]
+                }));
+                setFeedState('waiting');
+            };
+
+            ws.onmessage = async (evt) => {
+                let msg;
+                // AISStream delivers frames as Blobs, not strings
+                try { msg = JSON.parse(typeof evt.data === 'string' ? evt.data : await evt.data.text()); } catch { return; }
+                if (msg.error) {
+                    console.error('AISStream error:', msg.error);
+                    rapidFailures = 3; // rejected key — don't hammer reconnects
+                    ws.close();
+                    return;
+                }
+                if (msg.MessageType === 'PositionReport') handlePositionReport(msg);
+            };
+
+            ws.onclose = () => {
+                const rapid = Date.now() - lastOpenAt < 5000;
+                rapidFailures = rapid ? rapidFailures + 1 : 0;
+                if (rapidFailures >= 3) { setFeedState('error'); return; }
+                setFeedState('connecting');
+                setTimeout(connectAIS, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+            };
+        }
+
+        function handlePositionReport(msg) {
+            const ship = vessels.find(v => v.mmsi === (msg.MetaData && msg.MetaData.MMSI));
+            if (!ship || !msg.Message || !msg.Message.PositionReport) return;
+            if (feedState !== 'live') setFeedState('live');
+            reconnectDelay = 2000;
+
+            const pr = msg.Message.PositionReport;
+            ship.lat = pr.Latitude;
+            ship.lng = pr.Longitude;
+            if (typeof pr.Sog === 'number' && pr.Sog < 102.3) ship.speed = pr.Sog; // 102.3 = AIS "unavailable"
+            const hdg = (typeof pr.TrueHeading === 'number' && pr.TrueHeading < 360) ? pr.TrueHeading // 511 = unavailable
+                      : (typeof pr.Cog === 'number' && pr.Cog < 360) ? pr.Cog
+                      : ship.headingDeg;
+            ship.headingDeg = Math.round(hdg);
+            ship.status = ship.speed > 0.5 ? 'Cruising' : 'Moored / Docked';
+            ship.lastSeen = Date.now();
+
+            mapMarkers[ship.id].setLatLng([ship.lat, ship.lng]);
+            mapMarkers[ship.id].setIcon(markerIcon(ship, ship.id === selectedShipId));
+            if (ship.id === selectedShipId) updateDetailPanel(ship);
+        }
+
+        function lastSeenLabel(ship) {
+            if (!ship.lastSeen) return 'Simulated';
+            const s = Math.floor((Date.now() - ship.lastSeen) / 1000);
+            if (s < 60) return `${s}s ago`;
+            const m = Math.floor(s / 60);
+            if (m < 60) return `${m}m ago`;
+            return `${Math.floor(m / 60)}h ${m % 60}m ago`;
+        }
+
+        // ── API key modal ─────────────────────────────────────────────
+        function openKeyModal() {
+            const saved = localStorage.getItem(KEY_STORAGE);
+            document.getElementById('key-input').value = saved || '';
+            document.getElementById('key-clear-btn').classList.toggle('hidden', !saved);
+            document.getElementById('key-error').classList.add('hidden');
+            document.getElementById('key-modal').classList.remove('hidden');
+        }
+        function closeKeyModal() { document.getElementById('key-modal').classList.add('hidden'); }
+        function saveKey() {
+            const val = document.getElementById('key-input').value.trim();
+            if (!val) {
+                const err = document.getElementById('key-error');
+                err.innerText = 'Enter a key, or Cancel to stay in simulation.';
+                err.classList.remove('hidden');
+                return;
+            }
+            localStorage.setItem(KEY_STORAGE, val);
+            closeKeyModal();
+            resetFeed();
+        }
+        function clearKey() {
+            localStorage.removeItem(KEY_STORAGE);
+            closeKeyModal();
+            resetFeed();
+        }
+        function resetFeed() {
+            rapidFailures = 0;
+            reconnectDelay = 2000;
+            if (ws) { ws.onclose = null; ws.close(); ws = null; }
+            connectAIS();
+        }
+
+        // ── Simulated fallback tick ───────────────────────────────────
+        // Demo motion (~20x real speed for visibility) for ships that have
+        // never received live data. Ships with real AIS data are left alone.
         function aisTick() {
             vessels.forEach(ship => {
-                if (ship.speed <= 0) return;
-                // Rough deg-per-tick from knots (exaggerated ~20x for demo visibility)
+                if (ship.lastSeen || ship.speed <= 0.5) return;
                 const dist = (ship.speed / 60) * 0.02;
                 const rad = ship.headingDeg * Math.PI / 180;
                 ship.lat += dist * Math.cos(rad);
@@ -414,6 +581,7 @@
                 renderFleetList();
             });
             setInterval(aisTick, 5000);
+            connectAIS();
         };
     </script>
 </body>
