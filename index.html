@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cruisify - Next Gen Ship Tracker PoC</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: calc(100vh - 64px); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 3px; }
+        .ship-marker { transition: transform 0.3s ease; }
+        .ship-marker svg { filter: drop-shadow(0 0 4px rgba(34,211,238,0.6)); }
+        .ship-marker.selected svg { filter: drop-shadow(0 0 8px rgba(251,191,36,0.9)); }
+        .pulse-dot { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .pulse-dot, .ship-marker { animation: none; transition: none; }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 overflow-hidden font-sans">
+
+    <header class="h-16 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-6 z-50 relative">
+        <div class="flex items-center space-x-3">
+            <span class="text-2xl">🚢</span>
+            <h1 class="text-xl font-bold tracking-wider text-cyan-400">CRUISIFY<span class="text-xs text-slate-400 font-normal ml-2">PoC v1.1</span></h1>
+        </div>
+        <div class="flex items-center space-x-4">
+            <span class="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 font-mono flex items-center space-x-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span>
+                <span>Live AIS Feed Simulated</span>
+            </span>
+        </div>
+    </header>
+
+    <main class="flex h-[calc(100vh-64px)] w-full relative">
+
+        <div class="w-full h-full relative">
+            <div id="map" class="w-full h-full bg-slate-950"></div>
+        </div>
+
+        <div id="sidebar" class="w-[450px] max-w-full bg-slate-950 border-l border-slate-800 flex flex-col h-full absolute right-0 top-0 z-[1000] shadow-2xl transition-transform duration-300">
+
+            <div id="fleet-list-panel" class="flex flex-col h-full">
+                <div class="p-4 border-b border-slate-800">
+                    <div class="flex items-center justify-between mb-2">
+                        <h2 class="text-lg font-semibold text-slate-200">Active Fleet Tracking</h2>
+                        <span id="fleet-count" class="text-[10px] font-mono text-slate-500"></span>
+                    </div>
+                    <input id="fleet-search" type="text" placeholder="Search by name, class, or line..."
+                        class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-cyan-500 text-slate-200"
+                        autocomplete="off">
+                </div>
+                <div id="ship-cards-container" class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar"></div>
+            </div>
+
+            <div id="detail-panel" class="hidden flex flex-col h-full bg-slate-950">
+                <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900">
+                    <button onclick="closeDetails()" class="text-sm text-cyan-400 hover:text-cyan-300 font-medium flex items-center space-x-1">
+                        <span>← Back to Fleet</span>
+                    </button>
+                    <span id="vessel-tag" class="text-xs uppercase font-mono px-2 py-0.5 rounded font-bold"></span>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+
+                    <div>
+                        <h2 id="det-name" class="text-2xl font-black text-white tracking-tight"></h2>
+                        <p id="det-class" class="text-sm text-cyan-400 font-medium"></p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-slate-900 p-3 rounded border border-slate-800">
+                            <p class="text-[10px] text-slate-400 uppercase font-mono tracking-wider">CDC Health Score</p>
+                            <p id="det-cdc" class="text-xl font-bold mt-1"></p>
+                        </div>
+                        <div class="bg-slate-900 p-3 rounded border border-slate-800">
+                            <p class="text-[10px] text-slate-400 uppercase font-mono tracking-wider">Current Status</p>
+                            <p id="det-status" class="text-sm font-semibold text-emerald-400 mt-2 truncate"></p>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-900/50 p-4 rounded-lg border border-slate-800 space-y-2.5">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono mb-2">Live Telemetry</h3>
+                        <div class="flex justify-between text-xs"><span class="text-slate-400">Coordinates</span><span id="det-coords" class="font-mono text-slate-200"></span></div>
+                        <div class="flex justify-between text-xs"><span class="text-slate-400">Speed / Heading</span><span id="det-speed" class="font-mono text-slate-200"></span></div>
+                        <div class="flex justify-between text-xs"><span class="text-slate-400">Gross Tonnage</span><span id="det-tonnage" class="font-mono text-slate-200"></span></div>
+                        <div class="flex justify-between text-xs"><span class="text-slate-400">Port Capacity Context</span><span id="det-congestion" class="text-amber-400 font-medium text-right pl-4"></span></div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Current Voyage & Details</h3>
+                        <div class="border-l-2 border-cyan-500 pl-4 space-y-3">
+                            <div>
+                                <p class="text-[10px] uppercase text-slate-400 font-mono">Current Route</p>
+                                <p id="det-itinerary" class="text-sm font-medium text-slate-200"></p>
+                            </div>
+                            <div>
+                                <p class="text-[10px] uppercase text-slate-400 font-mono">Next Port of Call</p>
+                                <p id="det-nextport" class="text-sm font-medium text-amber-400"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pt-2">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono mb-2">Interactive Deck Plans</h3>
+                        <div class="bg-slate-900 border border-slate-800 rounded p-3 text-center">
+                            <span class="text-xs text-cyan-400 cursor-pointer hover:underline font-medium">🔍 Launch Interactive Blueprint Viewer</span>
+                            <p class="text-[10px] text-slate-500 mt-1">Features vertical cabin proximity auditing</p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // ── Fleet Dataset ─────────────────────────────────────────────
+        // speed (kn) and headingDeg are now first-class data fields so the
+        // detail panel + marker rotation are fully data-driven.
+        const vessels = [
+            {
+                id: "v1",
+                name: "Wonder of the Seas",
+                class: "Oasis Class",
+                type: "Passenger (Cruise)",
+                line: "Royal Caribbean",
+                cdcScore: 98,
+                status: "Cruising",
+                speed: 19.4,
+                headingDeg: 112,
+                lat: 25.7617, lng: -80.1918,
+                tonnage: "236,857 GT",
+                currentItinerary: "7-Night Western Caribbean from Miami",
+                nextPort: "Cozumel, Mexico (Arriving Tomorrow 07:00)",
+                portCongestion: "3 Ships in Port (Heavy Crowds Expected)",
+                accent: "blue"
+            },
+            {
+                id: "v2",
+                name: "Celebrity Beyond",
+                class: "Edge Class",
+                type: "Passenger (Cruise)",
+                line: "Celebrity Cruises",
+                cdcScore: 100,
+                status: "Moored / Docked",
+                speed: 0,
+                headingDeg: 0,
+                lat: 26.0848, lng: -80.1141,
+                tonnage: "140,600 GT",
+                currentItinerary: "7-Night Eastern Caribbean & Perfect Day",
+                nextPort: "San Juan, Puerto Rico (Departure 17:00)",
+                portCongestion: "1 Ship in Port (Light Crowds)",
+                accent: "purple"
+            },
+            {
+                id: "v3",
+                name: "Carnival Celebration",
+                class: "Excel Class",
+                type: "Passenger (Cruise)",
+                line: "Carnival Cruise Line",
+                cdcScore: 97,
+                status: "Cruising",
+                speed: 17.8,
+                headingDeg: 95,
+                lat: 25.4021, lng: -79.6803,
+                tonnage: "183,521 GT",
+                currentItinerary: "7-Night Eastern Caribbean from Miami",
+                nextPort: "Grand Turk (Arriving Tomorrow 08:00)",
+                portCongestion: "2 Ships in Port (Moderate Crowds)",
+                accent: "red"
+            },
+            {
+                id: "v4",
+                name: "Mardi Gras",
+                class: "Excel Class",
+                type: "Passenger (Cruise)",
+                line: "Carnival Cruise Line",
+                cdcScore: 99,
+                status: "Cruising",
+                speed: 16.2,
+                headingDeg: 188,
+                lat: 27.5306, lng: -79.9012,
+                tonnage: "181,808 GT",
+                currentItinerary: "7-Night Western Caribbean from Port Canaveral",
+                nextPort: "Nassau, Bahamas (Arriving Tomorrow 09:00)",
+                portCongestion: "4 Ships in Port (Heavy Crowds Expected)",
+                accent: "red"
+            },
+            {
+                id: "v5",
+                name: "Icon of the Seas",
+                class: "Icon Class",
+                type: "Passenger (Cruise)",
+                line: "Royal Caribbean",
+                cdcScore: 100,
+                status: "Moored / Docked",
+                speed: 0,
+                headingDeg: 0,
+                lat: 25.7743, lng: -80.1689,
+                tonnage: "248,663 GT",
+                currentItinerary: "7-Night Eastern Caribbean from Miami",
+                nextPort: "Perfect Day at CocoCay (Departure 16:30)",
+                portCongestion: "3 Ships in Port (Heavy Crowds Expected)",
+                accent: "blue"
+            },
+            {
+                id: "v6",
+                name: "MSC Seascape",
+                class: "Seaside EVO Class",
+                type: "Passenger (Cruise)",
+                line: "MSC Cruises",
+                cdcScore: 94,
+                status: "Cruising",
+                speed: 18.9,
+                headingDeg: 44,
+                lat: 24.9012, lng: -80.7534,
+                tonnage: "170,412 GT",
+                currentItinerary: "7-Night Bahamas & Florida from Miami",
+                nextPort: "Ocean Cay MSC Marine Reserve (Tomorrow 08:00)",
+                portCongestion: "1 Ship in Port (Light Crowds)",
+                accent: "amber"
+            }
+        ];
+
+        const ACCENTS = {
+            blue:   { tag: "bg-blue-500/20 text-blue-400 border border-blue-500/30",   fill: "#22d3ee" },
+            purple: { tag: "bg-purple-500/20 text-purple-400 border border-purple-500/30", fill: "#c084fc" },
+            red:    { tag: "bg-red-500/20 text-red-400 border border-red-500/30",       fill: "#f87171" },
+            amber:  { tag: "bg-amber-500/20 text-amber-400 border border-amber-500/30", fill: "#fbbf24" }
+        };
+
+        let map;
+        let mapMarkers = {};
+        let selectedShipId = null;
+        let searchQuery = "";
+
+        // ── Helpers ───────────────────────────────────────────────────
+        function compass(deg) {
+            const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+            return dirs[Math.round(deg / 22.5) % 16];
+        }
+
+        function statusLabel(ship) {
+            return ship.speed > 0 ? `Cruising at ${ship.speed.toFixed(1)} kn` : ship.status;
+        }
+
+        // Directional SVG marker: arrow rotated to heading when underway,
+        // ring dot when docked. Selected ship gets amber highlight + scale.
+        function markerIcon(ship, selected) {
+            const fill = selected ? "#fbbf24" : ACCENTS[ship.accent].fill;
+            const size = selected ? 30 : 22;
+            const shape = ship.speed > 0
+                ? `<polygon points="12,2 19,20 12,15 5,20" fill="${fill}" stroke="#0f172a" stroke-width="1.5" transform="rotate(${ship.headingDeg} 12 12)"/>`
+                : `<circle cx="12" cy="12" r="7" fill="${fill}" stroke="#0f172a" stroke-width="2"/><circle cx="12" cy="12" r="10" fill="none" stroke="${fill}" stroke-width="1.5" opacity="0.5"/>`;
+            return L.divIcon({
+                className: `ship-marker ${selected ? "selected" : ""}`,
+                html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24">${shape}</svg>`,
+                iconSize: [size, size],
+                iconAnchor: [size / 2, size / 2]
+            });
+        }
+
+        // ── Map ───────────────────────────────────────────────────────
+        function initMap() {
+            map = L.map('map', {
+                center: [25.9, -80.15],
+                zoom: 8,
+                zoomControl: true,
+                attributionControl: false
+            });
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19
+            }).addTo(map);
+
+            vessels.forEach(ship => {
+                const marker = L.marker([ship.lat, ship.lng], {
+                    icon: markerIcon(ship, false)
+                }).addTo(map);
+                marker.bindTooltip(ship.name, { direction: 'top', offset: [0, -12], className: 'font-mono' });
+                marker.on('click', () => showDetails(ship.id));
+                mapMarkers[ship.id] = marker;
+            });
+        }
+
+        function refreshMarkerStyles() {
+            vessels.forEach(ship => {
+                mapMarkers[ship.id].setIcon(markerIcon(ship, ship.id === selectedShipId));
+            });
+        }
+
+        // ── Fleet List + Search ───────────────────────────────────────
+        function getFilteredVessels() {
+            const q = searchQuery.trim().toLowerCase();
+            if (!q) return vessels;
+            return vessels.filter(s =>
+                s.name.toLowerCase().includes(q) ||
+                s.class.toLowerCase().includes(q) ||
+                s.line.toLowerCase().includes(q)
+            );
+        }
+
+        function renderFleetList() {
+            const filtered = getFilteredVessels();
+            const container = document.getElementById('ship-cards-container');
+            document.getElementById('fleet-count').innerText = `${filtered.length}/${vessels.length} VESSELS`;
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-10 space-y-1">
+                        <p class="text-sm text-slate-400">No vessels match "${searchQuery}"</p>
+                        <p class="text-xs text-slate-600">Try a ship name, class, or cruise line.</p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = filtered.map(ship => `
+                <div onclick="showDetails('${ship.id}')" class="bg-slate-900 hover:bg-slate-800/80 border ${ship.id === selectedShipId ? 'border-amber-500/60' : 'border-slate-800'} p-4 rounded-lg cursor-pointer transition flex justify-between items-start">
+                    <div class="space-y-1">
+                        <h4 class="font-bold text-white text-sm">${ship.name}</h4>
+                        <p class="text-xs text-slate-400">${ship.class} • ${ship.line}</p>
+                        <p class="text-[11px] font-mono ${ship.speed > 0 ? 'text-emerald-400' : 'text-slate-400'} mt-1">${statusLabel(ship)}</p>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">CDC: ${ship.cdcScore}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // ── Detail Panel ──────────────────────────────────────────────
+        function showDetails(shipId) {
+            const ship = vessels.find(v => v.id === shipId);
+            if (!ship) return;
+
+            selectedShipId = shipId;
+            refreshMarkerStyles();
+
+            map.flyTo([ship.lat, ship.lng], 11, { duration: 1.5 });
+
+            document.getElementById('fleet-list-panel').classList.add('hidden');
+            document.getElementById('detail-panel').classList.remove('hidden');
+
+            updateDetailPanel(ship);
+        }
+
+        function updateDetailPanel(ship) {
+            document.getElementById('det-name').innerText = ship.name;
+            document.getElementById('det-class').innerText = `${ship.class} • ${ship.line}`;
+            document.getElementById('det-status').innerText = statusLabel(ship);
+            document.getElementById('det-coords').innerText = `${ship.lat.toFixed(4)}°, ${ship.lng.toFixed(4)}°`;
+            document.getElementById('det-speed').innerText = ship.speed > 0
+                ? `${ship.speed.toFixed(1)} kn / ${ship.headingDeg}° ${compass(ship.headingDeg)}`
+                : `0 kn / At Pier`;
+            document.getElementById('det-tonnage').innerText = ship.tonnage;
+            document.getElementById('det-itinerary').innerText = ship.currentItinerary;
+            document.getElementById('det-nextport').innerText = ship.nextPort;
+            document.getElementById('det-congestion').innerText = ship.portCongestion;
+
+            const cdcEl = document.getElementById('det-cdc');
+            cdcEl.innerText = `${ship.cdcScore}/100`;
+            cdcEl.className = `text-xl font-bold mt-1 ${ship.cdcScore >= 98 ? 'text-emerald-400' : 'text-amber-400'}`;
+
+            const tagEl = document.getElementById('vessel-tag');
+            tagEl.innerText = ship.type;
+            tagEl.className = `text-[10px] uppercase font-mono px-2 py-0.5 rounded font-bold ${ACCENTS[ship.accent].tag}`;
+        }
+
+        function closeDetails() {
+            selectedShipId = null;
+            refreshMarkerStyles();
+            document.getElementById('detail-panel').classList.add('hidden');
+            document.getElementById('fleet-list-panel').classList.remove('hidden');
+            renderFleetList();
+            map.flyTo([25.9, -80.15], 8, { duration: 1 });
+        }
+
+        // ── Simulated AIS tick ────────────────────────────────────────
+        // Nudges underway vessels along their heading every 5s so the
+        // "Live Feed" badge is honest about being a simulation, not a
+        // static screenshot. Swap this block for a real WebSocket
+        // (e.g. AISStream.io) when moving past PoC.
+        function aisTick() {
+            vessels.forEach(ship => {
+                if (ship.speed <= 0) return;
+                // Rough deg-per-tick from knots (exaggerated ~20x for demo visibility)
+                const dist = (ship.speed / 60) * 0.02;
+                const rad = ship.headingDeg * Math.PI / 180;
+                ship.lat += dist * Math.cos(rad);
+                ship.lng += dist * Math.sin(rad);
+                mapMarkers[ship.id].setLatLng([ship.lat, ship.lng]);
+            });
+            if (selectedShipId) {
+                const ship = vessels.find(v => v.id === selectedShipId);
+                if (ship) updateDetailPanel(ship);
+            }
+        }
+
+        // ── Boot ──────────────────────────────────────────────────────
+        window.onload = () => {
+            initMap();
+            renderFleetList();
+            document.getElementById('fleet-search').addEventListener('input', (e) => {
+                searchQuery = e.target.value;
+                renderFleetList();
+            });
+            setInterval(aisTick, 5000);
+        };
+    </script>
+</body>
+</html>
