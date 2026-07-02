@@ -2,7 +2,7 @@
 
 A next-gen cruise ship fleet tracker — proof of concept.
 
-**Live demo:** https://YOUR-USERNAME.github.io/cruisify/
+**Live demo:** https://lucasalvarezflorida-lab.github.io/cruisify/
 
 ## What it does
 
