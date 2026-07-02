@@ -11,6 +11,7 @@ A next-gen cruise ship fleet tracker — proof of concept.
 - Fleet search by ship name, class, or cruise line
 - Per-vessel detail panel: live telemetry (coordinates, speed/heading, tonnage, AIS data freshness), CDC health score, current itinerary, next port of call, and port congestion context
 - **Live AIS positions** via AISStream.io WebSocket (bring your own free API key), with a simulated fallback when no key is set
+- **Dead reckoning** — when a ship goes quiet between shore receivers, its position is projected along its last course/speed and drawn as a dimmed, dashed marker with "(est.)" coordinates (capped at 6 hours)
 
 ## Why it exists
 
@@ -38,7 +39,7 @@ Positions are simulated until an [AISStream.io](https://aisstream.io) API key (f
   window.CRUISIFY_CONFIG = { aisApiKey: "your-key-here" };
   ```
 
-Note: AISStream uses terrestrial AIS receivers, so ships far from shore can go quiet for stretches — the detail panel shows how fresh each ship's last report is, and the last known position stays on the map.
+Note: AISStream uses terrestrial AIS receivers, so ships far from shore can go quiet for stretches — the detail panel shows how fresh each ship's last report is. Quiet ships are dead-reckoned along their last course and speed (shown as estimated); after 6 hours of silence the projection stops at the last estimate.
 
 ## Running locally
 

@@ -289,8 +289,11 @@
         function markerIcon(ship, selected) {
             const fill = selected ? "#fbbf24" : ACCENTS[ship.accent].fill;
             const size = selected ? 30 : 22;
+            const est = !!ship.estimated;
             const shape = ship.speed > 0.5
-                ? `<polygon points="12,2 19,20 12,15 5,20" fill="${fill}" stroke="#0f172a" stroke-width="1.5" transform="rotate(${ship.headingDeg} 12 12)"/>`
+                ? (est
+                    ? `<polygon points="12,2 19,20 12,15 5,20" fill="${fill}" fill-opacity="0.35" stroke="${fill}" stroke-width="1.5" stroke-dasharray="2.5 2" transform="rotate(${ship.headingDeg} 12 12)"/>`
+                    : `<polygon points="12,2 19,20 12,15 5,20" fill="${fill}" stroke="#0f172a" stroke-width="1.5" transform="rotate(${ship.headingDeg} 12 12)"/>`)
                 : `<circle cx="12" cy="12" r="7" fill="${fill}" stroke="#0f172a" stroke-width="2"/><circle cx="12" cy="12" r="10" fill="none" stroke="${fill}" stroke-width="1.5" opacity="0.5"/>`;
             return L.divIcon({
                 className: `ship-marker ${selected ? "selected" : ""}`,
@@ -388,7 +391,7 @@
             document.getElementById('det-name').innerText = ship.name;
             document.getElementById('det-class').innerText = `${ship.class} • ${ship.line}`;
             document.getElementById('det-status').innerText = statusLabel(ship);
-            document.getElementById('det-coords').innerText = `${ship.lat.toFixed(4)}°, ${ship.lng.toFixed(4)}°`;
+            document.getElementById('det-coords').innerText = `${ship.lat.toFixed(4)}°, ${ship.lng.toFixed(4)}°${ship.estimated ? ' (est.)' : ''}`;
             document.getElementById('det-speed').innerText = ship.speed > 0.5
                 ? `${ship.speed.toFixed(1)} kn / ${ship.headingDeg}° ${compass(ship.headingDeg)}`
                 : `${ship.speed.toFixed(1)} kn / At Pier`;
@@ -499,6 +502,9 @@
             const pr = msg.Message.PositionReport;
             ship.lat = pr.Latitude;
             ship.lng = pr.Longitude;
+            ship.repLat = pr.Latitude;   // dead-reckoning anchor: last *reported* position
+            ship.repLng = pr.Longitude;
+            ship.estimated = false;
             if (typeof pr.Sog === 'number' && pr.Sog < 102.3) ship.speed = pr.Sog; // 102.3 = AIS "unavailable"
             const hdg = (typeof pr.TrueHeading === 'number' && pr.TrueHeading < 360) ? pr.TrueHeading // 511 = unavailable
                       : (typeof pr.Cog === 'number' && pr.Cog < 360) ? pr.Cog
@@ -554,17 +560,37 @@
             connectAIS();
         }
 
-        // ── Simulated fallback tick ───────────────────────────────────
-        // Demo motion (~20x real speed for visibility) for ships that have
-        // never received live data. Ships with real AIS data are left alone.
+        // ── Position tick: simulation + dead reckoning ───────────────
+        // Ships never seen live get demo motion (~20x real speed for
+        // visibility). Live ships that have gone quiet are dead-reckoned
+        // from their last reported position along their last speed/heading,
+        // recomputed from the anchor each tick so error doesn't compound,
+        // and drawn as estimated (dimmed, dashed) markers.
+        const DR_MIN_AGE = 2 * 60 * 1000;       // start estimating after 2 min of silence
+        const DR_MAX_AGE = 6 * 60 * 60 * 1000;  // beyond 6 h a straight-line guess is fiction
+
         function aisTick() {
+            const now = Date.now();
             vessels.forEach(ship => {
-                if (ship.lastSeen || ship.speed <= 0.5) return;
-                const dist = (ship.speed / 60) * 0.02;
+                if (!ship.lastSeen) {
+                    if (ship.speed <= 0.5) return;
+                    const dist = (ship.speed / 60) * 0.02;
+                    const rad = ship.headingDeg * Math.PI / 180;
+                    ship.lat += dist * Math.cos(rad);
+                    ship.lng += dist * Math.sin(rad);
+                    mapMarkers[ship.id].setLatLng([ship.lat, ship.lng]);
+                    return;
+                }
+                const age = now - ship.lastSeen;
+                if (ship.speed <= 0.5 || age < DR_MIN_AGE || age > DR_MAX_AGE) return;
+                const nm = ship.speed * (age / 3600000);       // knots × hours = nautical miles
                 const rad = ship.headingDeg * Math.PI / 180;
-                ship.lat += dist * Math.cos(rad);
-                ship.lng += dist * Math.sin(rad);
+                ship.lat = ship.repLat + (nm / 60) * Math.cos(rad);
+                ship.lng = ship.repLng + (nm / 60) * Math.sin(rad) / Math.cos(ship.repLat * Math.PI / 180);
+                const wasEstimated = ship.estimated;
+                ship.estimated = true;
                 mapMarkers[ship.id].setLatLng([ship.lat, ship.lng]);
+                if (!wasEstimated) mapMarkers[ship.id].setIcon(markerIcon(ship, ship.id === selectedShipId));
             });
             if (selectedShipId) {
                 const ship = vessels.find(v => v.id === selectedShipId);
